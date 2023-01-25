@@ -1,0 +1,25 @@
+{
+  "formatter": {
+    "enabled": true,
+    "ignore": [
+      "mermaid@9.0.3/*.js"
+    ],
+    "indentStyle": "space",
+    "indentSize": 2
+  },
+  "linter": {
+    "enabled": true,
+    "ignore": [
+      "mermaid@9.0.3/*.js"
+    ],
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "error"
+      },
+      "style": {
+        "useBlockStatements": "off"
+      }
+    }
+  }
+}
