@@ -8,13 +8,80 @@ import system from "system";
 
 Gtk.init();
 
-const [graph] = system.programArgs;
+function decode(data) {
+  return new TextDecoder().decode(data);
+}
 
 const loop = new GLib.MainLoop(null, false);
 
 const web_view = new WebKit.WebView({
-  'is-ephemeral': true
+  "is-ephemeral": true,
 });
+
+const app = new Gio.Application({
+  flags: Gio.ApplicationFlags.DEFAULT_FLAGS,
+});
+
+function showHelp() {
+  const [, stdout, stderr] = GLib.spawn_command_line_sync(
+    `${system.programInvocationName} --help`
+  );
+
+  if (stdout) {
+    print(decode(stdout));
+  } else if (stderr) {
+    printerr(decode(stderr));
+  }
+}
+
+app.add_main_option(
+  "input",
+  "i",
+  GLib.OptionFlags.NONE,
+  GLib.OptionArg.FILENAME,
+  "Input mermaid file. Required",
+  "<input>"
+);
+
+app.add_main_option(
+  "output",
+  "o",
+  GLib.OptionFlags.NONE,
+  GLib.OptionArg.FILENAME,
+  "Output file. Required",
+  "<output>"
+);
+
+let input;
+let output;
+
+app.connect("handle-local-options", (_self, options) => {
+  if (options.contains("version")) {
+    print("alpha");
+    return 0;
+  }
+
+  input = decode(
+    options.lookup_value("input", null)?.unpack() || new Uint8Array()
+  );
+  output = decode(
+    options.lookup_value("output", null)?.unpack() || new Uint8Array()
+  );
+
+  return -1;
+});
+
+app.connect("activate", () => {
+  if (!input) {
+    showHelp();
+    system.exit(0);
+  }
+});
+
+app.run([system.programInvocationName].concat(system.programArgs));
+
+const input_file = Gio.File.new_for_path(input);
+const output_file = Gio.File.new_for_path(output);
 
 web_view.connect("load-changed", (_self, load_event) => {
   if (load_event !== WebKit.LoadEvent.FINISHED) return;
@@ -22,8 +89,14 @@ web_view.connect("load-changed", (_self, load_event) => {
 });
 
 function onLoadFinished() {
-  const id = `mermaid-${GLib.random_int()}` ;
-  const script = `mermaid.mermaidAPI.render("${id}", \`${graph.replaceAll('\`', '\\`')}\`);`;
+  const [, contents] = input_file.load_contents(null);
+  const graph = decode(contents);
+
+  const id = `mermaid-${GLib.random_int()}`;
+  const script = `mermaid.mermaidAPI.render("${id}", \`${graph.replaceAll(
+    "`",
+    "\\`"
+  )}\`);`;
 
   web_view.run_javascript(script, null, (_self, async_result) => {
     let result;
@@ -36,7 +109,13 @@ function onLoadFinished() {
       system.exit(1);
     }
 
-    print(result);
+    output_file.replace_contents(
+      result,
+      null,
+      false,
+      Gio.FileCreateFlags.REPLACE_DESTINATION,
+      null
+    );
     loop.quit();
   });
 }
@@ -53,7 +132,7 @@ const html = `
   <body>
   </body>
 </html>
-`
+`;
 web_view.load_html(html, null);
 
 loop.run();
