@@ -1,0 +1,435 @@
+#!/usr/bin/env -S gjs -m
+import GLib from 'gi://GLib';
+import system from 'system';
+import Gtk from 'gi://Gtk?version=4.0';
+import Gio from 'gi://Gio';
+import WebKit from 'gi://WebKit2?version=5.0';
+
+var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
+
+function getAugmentedNamespace(n) {
+  if (n.__esModule) return n;
+  var f = n.default;
+	if (typeof f == "function") {
+		var a = function a () {
+			if (this instanceof a) {
+				var args = [null];
+				args.push.apply(args, arguments);
+				var Ctor = Function.bind.apply(f, args);
+				return new Ctor();
+			}
+			return f.apply(this, arguments);
+		};
+		a.prototype = f.prototype;
+  } else a = {};
+  Object.defineProperty(a, '__esModule', {value: true});
+	Object.keys(n).forEach(function (k) {
+		var d = Object.getOwnPropertyDescriptor(n, k);
+		Object.defineProperty(a, k, d.get ? d : {
+			enumerable: true,
+			get: function () {
+				return n[k];
+			}
+		});
+	});
+	return a;
+}
+
+var pandocFilter = {};
+
+var _rollup_plugin_ignore_empty_module_placeholder = {};
+
+var _rollup_plugin_ignore_empty_module_placeholder$1 = /*#__PURE__*/Object.freeze({
+	__proto__: null,
+	default: _rollup_plugin_ignore_empty_module_placeholder
+});
+
+var require$$0 = /*@__PURE__*/getAugmentedNamespace(_rollup_plugin_ignore_empty_module_placeholder$1);
+
+/*! pandoc-filter-node | (C) 2014 Mike Henderson <mvhenderson@tds.net> | License: MIT */
+var __importDefault = (commonjsGlobal && commonjsGlobal.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(pandocFilter, "__esModule", { value: true });
+const get_stdin_1 = __importDefault(require$$0);
+/**
+ * Converts an action into a filter that reads a JSON-formatted pandoc
+ * document from stdin, transforms it by walking the tree with the action, and
+ * returns a new JSON-formatted pandoc document to stdout. The argument is a
+ * function action(key, value, format, meta), where key is the type of the
+ * pandoc object (e.g. 'Str', 'Para'), value is the contents of the object
+ * (e.g. a string for 'Str', a list of inline elements for 'Para'), format is
+ * the target output format (which will be taken for the first command
+ * line argument if present), and meta is the document's metadata. If the
+ * function returns None, the object to which it applies will remain
+ * unchanged. If it returns an object, the object will be replaced. If it
+ * returns a list, the list will be spliced in to the list to which the target
+ * object belongs. (So, returning an empty list deletes the object.)
+ *
+ * @param  {Function} action Callback to apply to every object
+ */
+async function toJSONFilter(action) {
+    const json = await get_stdin_1.default();
+    var data = JSON.parse(json);
+    var format = process.argv.length > 2 ? process.argv[2] : "";
+    filter(data, action, format).then((output) => process.stdout.write(JSON.stringify(output)));
+}
+pandocFilter.toJSONFilter = toJSONFilter;
+function isElt(x) {
+    return (typeof x === "object" && x && "t" in x) || false;
+}
+function isEltArray(x) {
+    return x.every(isElt);
+}
+/**
+ * Walk a tree, applying an action to every object.
+ * @param  {Object}   x      The object to traverse
+ * @param  {Function} action Callback to apply to each item
+ * @param  {String}   format Output format
+ * @param  {Object}   meta   Pandoc metadata
+ * @return {Object}          The modified tree
+ */
+async function walk(x, action, format, meta) {
+    if (typeof action === "function")
+        action = { single: action };
+    if (Array.isArray(x)) {
+        if (action.array && isEltArray(x)) {
+            x = await action.array(x, format, meta);
+            if (!Array.isArray(x))
+                throw "impossible (just for ts)";
+        }
+        var array = [];
+        for (const item of x) {
+            if (isElt(item) && action.single) {
+                var res = (await action.single(item, format, meta)) || item;
+                if (Array.isArray(res)) {
+                    for (const z of res) {
+                        array.push(await walk(z, action, format, meta));
+                    }
+                }
+                else {
+                    array.push(await walk(res, action, format, meta));
+                }
+            }
+            else {
+                array.push(await walk(item, action, format, meta));
+            }
+        }
+        return array;
+    }
+    else if (typeof x === "object" && x !== null) {
+        var obj = {};
+        for (const k of Object.keys(x)) {
+            obj[k] = await walk(x[k], action, format, meta);
+        }
+        return obj;
+    }
+    return x;
+}
+pandocFilter.walk = walk;
+function walkSync(x, action, format, meta) {
+    if (Array.isArray(x)) {
+        var array = [];
+        for (const item of x) {
+            if (isElt(item)) {
+                var res = action(item, format, meta) || item;
+                if (Array.isArray(res)) {
+                    for (const z of res) {
+                        array.push(walkSync(z, action, format, meta));
+                    }
+                }
+                else {
+                    array.push(walkSync(res, action, format, meta));
+                }
+            }
+            else {
+                array.push(walkSync(item, action, format, meta));
+            }
+        }
+        return array;
+    }
+    else if (typeof x === "object" && x !== null) {
+        var obj = {};
+        for (const k of Object.keys(x)) {
+            obj[k] = walkSync(x[k], action, format, meta);
+        }
+        return obj;
+    }
+    return x;
+}
+pandocFilter.walkSync = walkSync;
+/**
+ * Walks the tree x and returns concatenated string content, leaving out all
+ * formatting.
+ * @param  {Object} x The object to walk
+ * @return {String}   JSON string
+ */
+function stringify(x) {
+    if (!Array.isArray(x) && x.t === "MetaString")
+        return x.c;
+    var result = [];
+    var go = function (e) {
+        if (e.t === "Str")
+            result.push(e.c);
+        else if (e.t === "Code")
+            result.push(e.c[1]);
+        else if (e.t === "Math")
+            result.push(e.c[1]);
+        else if (e.t === "LineBreak")
+            result.push(" ");
+        else if (e.t === "Space")
+            result.push(" ");
+        else if (e.t === "SoftBreak")
+            result.push(" ");
+        else if (e.t === "Para")
+            result.push("\n");
+    };
+    walkSync(x, go, "", {});
+    return result.join("");
+}
+pandocFilter.stringify = stringify;
+/**
+ * Returns an attribute list, constructed from the dictionary attrs.
+ * @param  {Object} attrs Attribute dictionary
+ * @return {Array}        Attribute list
+ */
+function attributes(attrs) {
+    attrs = attrs || {};
+    var ident = attrs.id || "";
+    var classes = attrs.classes || [];
+    var keyvals = [];
+    Object.keys(attrs).forEach(function (k) {
+        if (k !== "classes" && k !== "id")
+            keyvals.push([k, attrs[k]]);
+    });
+    return [ident, classes, keyvals];
+}
+pandocFilter.attributes = attributes;
+// Utility for creating constructor functions
+function elt(eltType, numargs) {
+    return function (...args) {
+        var len = args.length;
+        if (len !== numargs)
+            throw (eltType + " expects " + numargs + " arguments, but given " + len);
+        return { t: eltType, c: len === 1 ? args[0] : args };
+    };
+}
+pandocFilter.elt = elt;
+/**
+ * Filter the given object
+ */
+async function filter(data, action, format) {
+    return (await walk(data, action, format, data.meta || data[0].unMeta));
+}
+var filter_1 = pandocFilter.filter = filter;
+/** `.meta` in the pandoc json format describes the markdown frontmatter yaml as an AST as described in
+ *  https://hackage.haskell.org/package/pandoc-types-1.20/docs/Text-Pandoc-Definition.html#t:MetaValue
+ *
+ * this function converts a raw object to a pandoc meta AST object
+ **/
+function rawToMeta(e) {
+    if (Array.isArray(e)) {
+        return { t: "MetaList", c: e.map((x) => rawToMeta(x)) };
+    }
+    // warning: information loss: can't tell if it was a number or string
+    if (typeof e === "string" || typeof e === "number")
+        return { t: "MetaString", c: String(e) };
+    if (typeof e === "object") {
+        const c = fromEntries(Object.entries(e).map(([k, v]) => [k, rawToMeta(v)]));
+        return { t: "MetaMap", c };
+    }
+    if (typeof e === "boolean")
+        return { t: "MetaBool", c: e };
+    throw Error(typeof e);
+}
+pandocFilter.rawToMeta = rawToMeta;
+function metaToRaw(m) {
+    if (m.t === "MetaMap") {
+        return fromEntries(Object.entries(m.c).map(([k, v]) => [k, metaToRaw(v)]));
+    }
+    else if (m.t === "MetaList") {
+        return m.c.map(metaToRaw);
+    }
+    else if (m.t === "MetaBool" || m.t === "MetaString") {
+        return m.c;
+    }
+    else if (m.t === "MetaInlines" || m.t === "MetaBlocks") {
+        // warning: information loss: removes formatting
+        return stringify(m.c);
+    }
+    throw Error(`Unknown meta type ${m.t}`);
+}
+pandocFilter.metaToRaw = metaToRaw;
+/** meta root object is a map */
+function metaMapToRaw(c) {
+    return metaToRaw({ t: "MetaMap", c });
+}
+pandocFilter.metaMapToRaw = metaMapToRaw;
+/** Object.fromEntries ponyfill */
+function fromEntries(iterable) {
+    return [...iterable].reduce((obj, [key, val]) => {
+        obj[key] = val;
+        return obj;
+    }, {});
+}
+// Constructors for block elements
+pandocFilter.Plain = elt("Plain", 1);
+var Para = pandocFilter.Para = elt("Para", 1);
+pandocFilter.CodeBlock = elt("CodeBlock", 2);
+pandocFilter.RawBlock = elt("RawBlock", 2);
+pandocFilter.BlockQuote = elt("BlockQuote", 1);
+pandocFilter.OrderedList = elt("OrderedList", 2);
+pandocFilter.BulletList = elt("BulletList", 1);
+pandocFilter.DefinitionList = elt("DefinitionList", 1);
+pandocFilter.Header = elt("Header", 3);
+pandocFilter.HorizontalRule = elt("HorizontalRule", 0);
+pandocFilter.Table = elt("Table", 6);
+pandocFilter.Div = elt("Div", 2);
+pandocFilter.Null = elt("Null", 0);
+// Constructors for inline elements
+pandocFilter.Str = elt("Str", 1);
+pandocFilter.Emph = elt("Emph", 1);
+pandocFilter.Strong = elt("Strong", 1);
+pandocFilter.Strikeout = elt("Strikeout", 1);
+pandocFilter.Superscript = elt("Superscript", 1);
+pandocFilter.Subscript = elt("Subscript", 1);
+pandocFilter.SmallCaps = elt("SmallCaps", 1);
+pandocFilter.Quoted = elt("Quoted", 2);
+pandocFilter.Cite = elt("Cite", 2);
+pandocFilter.Code = elt("Code", 2);
+pandocFilter.Space = elt("Space", 0);
+pandocFilter.LineBreak = elt("LineBreak", 0);
+pandocFilter.Formula = elt("Math", 2); // don't conflict with js builtin Math;
+var RawInline = pandocFilter.RawInline = elt("RawInline", 2);
+pandocFilter.Link = elt("Link", 3);
+pandocFilter.Image = elt("Image", 3);
+pandocFilter.Note = elt("Note", 1);
+pandocFilter.Span = elt("Span", 2);
+// a few aliases
+pandocFilter.stdio = toJSONFilter;
+
+function decode(data) {
+  return new TextDecoder().decode(data);
+}
+
+async function getStdin() {
+  Gio._promisify(Gio.OutputStream.prototype, "splice_async", "splice_finish");
+
+  const input_stream = new Gio.UnixInputStream({ fd: 0 });
+  const output_stream = Gio.MemoryOutputStream.new_resizable();
+
+  await output_stream.splice_async(
+    input_stream,
+    Gio.OutputStreamSpliceFlags.CLOSE_TARGET |
+      Gio.OutputStreamSpliceFlags.CLOSE_SOURCE,
+    GLib.PRIORITY_DEFAULT,
+    null,
+  );
+
+  const bytes = output_stream.steal_as_bytes();
+  return decode(bytes.toArray());
+}
+
+/*
+
+// To test, uncomment the following and run with
+// > echo foobar | gjs -m src/get-stdin.js
+
+const loop = new GLib.MainLoop(null, false);
+getStdin()
+  .then(print)
+  .catch(logError)
+  .finally(() => {
+    loop.quit();
+  });
+loop.run();
+
+*/
+
+const file = Gio.File.new_for_path("./mermaid@9.0.3/mermaid.min.js");
+const mermaid_source = new TextDecoder().decode(file.load_contents(null)[1]);
+const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <script>${mermaid_source}</script>
+</head>
+<body>
+</body>
+</html>
+`.trim();
+
+function render(graph) {
+  return new Promise((resolve, reject) => {
+    const web_view = new WebKit.WebView({
+      "is-ephemeral": true,
+    });
+
+    web_view.connect("load-changed", (_self, load_event) => {
+      if (load_event !== WebKit.LoadEvent.FINISHED) return;
+      onLoadFinished();
+    });
+
+    function onLoadFinished() {
+      const id = `mermaid-${GLib.random_int()}`;
+      const script = `mermaid.mermaidAPI.render("${id}", \`${graph.replaceAll(
+        "`",
+        "\\`",
+      )}\`);`;
+
+      web_view.run_javascript(script, null, (_self, async_result) => {
+        let result;
+        try {
+          const javascript_result =
+            web_view.run_javascript_finish(async_result);
+          const javascipt_value = javascript_result.get_js_value();
+          result = javascipt_value.to_string();
+        } catch (err) {
+          reject(err);
+          return;
+        }
+
+        resolve(result);
+      });
+    }
+
+    web_view.load_html(html, null);
+  });
+}
+
+const loop = new GLib.MainLoop(null, false);
+
+Gtk.init();
+
+globalThis.process = {
+  argv: [system.programInvocationName, system.programArgs],
+  stdout: {
+    write(data) {
+      print(data);
+    },
+  },
+};
+
+async function mermaid({ t: type, c: value }) {
+  if (type !== "CodeBlock") return null;
+
+  if (value[0][1][0] !== "mermaid") return null;
+
+  const graph = value[1];
+
+  const svg = await render(graph);
+
+  return Para([RawInline("html", svg)]);
+}
+
+getStdin()
+  .then(async (stdin) => {
+    const data = JSON.parse(stdin);
+    const output = await filter_1(data, mermaid);
+    print(JSON.stringify(output));
+  })
+  .catch(logError)
+  .finally(() => loop.quit());
+
+loop.run();

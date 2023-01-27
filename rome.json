@@ -2,7 +2,9 @@
   "formatter": {
     "enabled": true,
     "ignore": [
-      "mermaid@9.0.3/*.js"
+      "mermaid@9.0.3/*.js",
+      "dist/*",
+      "lib/*"
     ],
     "indentStyle": "space",
     "indentSize": 2
@@ -10,7 +12,9 @@
   "linter": {
     "enabled": true,
     "ignore": [
-      "mermaid@9.0.3/*.js"
+      "mermaid@9.0.3/*.js",
+      "dist/*",
+      "lib/*"
     ],
     "rules": {
       "recommended": true,
