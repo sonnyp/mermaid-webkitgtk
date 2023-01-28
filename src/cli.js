@@ -4,9 +4,8 @@ import Gio from "gi://Gio";
 import Gtk from "gi://Gtk?version=4.0";
 import GLib from "gi://GLib";
 import system from "system";
-import { render } from "./mermaid.js";
-
 import { decode } from "./util.js";
+import { render } from "./mermaid.js";
 
 Gtk.init();
 

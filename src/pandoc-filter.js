@@ -2,24 +2,14 @@
 
 import GLib from "gi://GLib";
 import * as pandoc from "../lib/pandoc-filter.js";
-import system from "system";
 import Gtk from "gi://Gtk?version=4.0";
-import getStdin from "./get-stdin.js";
+import { getStdin } from "./util.js";
 
 import { render } from "./mermaid.js";
 
 const loop = new GLib.MainLoop(null, false);
 
 Gtk.init();
-
-globalThis.process = {
-  argv: [system.programInvocationName, system.programArgs],
-  stdout: {
-    write(data) {
-      print(data);
-    },
-  },
-};
 
 async function mermaid({ t: type, c: value }) {
   if (type !== "CodeBlock") return null;
@@ -28,7 +18,15 @@ async function mermaid({ t: type, c: value }) {
 
   const graph = value[1];
 
-  const svg = await render(graph);
+  if (!graph) return null;
+
+  let svg;
+  try {
+    svg = await render(graph);
+  } catch (_err) {
+    // logError(_err);
+    return null;
+  }
 
   return pandoc.Para([pandoc.RawInline("html", svg)]);
 }
@@ -40,6 +38,8 @@ getStdin()
     print(JSON.stringify(output));
   })
   .catch(logError)
-  .finally(() => loop.quit());
+  .finally(() => {
+    loop.quit();
+  });
 
 loop.run();
