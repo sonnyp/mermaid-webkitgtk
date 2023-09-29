@@ -5,13 +5,15 @@ It provides a browser/JavaScipt API which can render to SVG.
 
 This is a collection of utils to use WebkitGTK to render mermaid graphs.
 
+Requirements: GJS, WebKitGTK >= 2.42
+
 ## CLI
 
 There is [mermaid-cli](https://github.com/mermaid-js/mermaid-cli) which uses the JavaScript API in [Puppeteer](http://pptr.dev/).
 
 This is an alternative and lighter renderer making use of WebKitGTK.
 
-```
+```sh
 > ./src/cli --help
 ```
 

@@ -6,7 +6,6 @@
     "mermaid": "^9.3.0",
     "pandoc-filter": "^2.1.0",
     "rollup": "^3.11.0",
-    "rollup-plugin-ignore": "^1.0.10",
-    "rome": "^11.0.0"
+    "rollup-plugin-ignore": "^1.0.10"
   }
 }

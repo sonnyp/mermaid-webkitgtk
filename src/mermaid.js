@@ -1,7 +1,7 @@
 #!/usr/bin/env -S gjs -m
 
 import Gio from "gi://Gio";
-import WebKit from "gi://WebKit2?version=5.0";
+import WebKit from "gi://WebKit?version=6.0";
 import GLib from "gi://GLib";
 
 import { decode } from "./util.js";
@@ -23,9 +23,10 @@ const html = `
 `.trim();
 
 export function render(graph) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    const network_session = WebKit.NetworkSession.new_ephemeral();
     const web_view = new WebKit.WebView({
-      "is-ephemeral": true,
+      network_session,
     });
 
     web_view.connect("load-changed", (_self, load_event) => {
@@ -37,23 +38,29 @@ export function render(graph) {
       const id = `mermaid-${GLib.random_int()}`;
       const script = `mermaid.mermaidAPI.render("${id}", \`${graph.replaceAll(
         "`",
-        "\\`",
+        "\\`"
       )}\`);`;
 
-      web_view.run_javascript(script, null, (_self, async_result) => {
-        let result;
-        try {
-          const javascript_result =
-            web_view.run_javascript_finish(async_result);
-          const javascipt_value = javascript_result.get_js_value();
-          result = javascipt_value.to_string();
-        } catch (err) {
-          reject(err);
-          return;
-        }
+      web_view.evaluate_javascript(
+        script, // script
+        -1, // length
+        null, // world_name
+        null, // source_uri
+        null, // cancellable
+        (_self, async_result) => {
+          let result;
+          try {
+            result = web_view
+              .evaluate_javascript_finish(async_result)
+              ?.to_string();
+          } catch (err) {
+            reject(err);
+            return;
+          }
 
-        resolve(result);
-      });
+          resolve(result);
+        }
+      );
     }
 
     web_view.load_html(html, null);
